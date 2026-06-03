@@ -1,0 +1,213 @@
+export const DEFAULT_SELECTION_PROPERTY = "baseops_selected";
+export const DEFAULT_PREVIEW_LIMIT = 50;
+
+export type BulkOperation = "replace" | "add" | "remove" | "clear";
+
+export interface FilePropertyState {
+  path: string;
+  propertyExists: boolean;
+  value: unknown;
+}
+
+export interface PlannedChange {
+  path: string;
+  propertyExists: boolean;
+  oldValue: unknown;
+  newValue: unknown;
+  oldDisplay: string;
+  newDisplay: string;
+}
+
+export interface SkippedChange {
+  path: string;
+  value: unknown;
+  reason: string;
+}
+
+export interface OperationPlan {
+  operation: BulkOperation;
+  propertyName: string;
+  totalFiles: number;
+  changedFiles: PlannedChange[];
+  skippedFiles: SkippedChange[];
+}
+
+export function isSelectedValue(value: unknown): boolean {
+  if (value === true || value === 1) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "yes" || normalized === "1";
+  }
+
+  return false;
+}
+
+export function normalizePropertyName(propertyName: string): string {
+  return propertyName.trim();
+}
+
+export function operationNeedsValue(operation: BulkOperation): boolean {
+  return operation !== "clear";
+}
+
+export function parseInputValue(rawValue: string, operation: BulkOperation, propertyName: string): unknown {
+  if (!operationNeedsValue(operation)) {
+    return undefined;
+  }
+
+  const trimmed = rawValue.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Enter a value before previewing this operation.");
+  }
+
+  if (operation === "add" || operation === "remove") {
+    return splitListInput(trimmed, propertyName);
+  }
+
+  return normalizeToken(trimmed, propertyName);
+}
+
+export function planOperation(
+  files: FilePropertyState[],
+  propertyNameInput: string,
+  operation: BulkOperation,
+  rawValue: string
+): OperationPlan {
+  const propertyName = normalizePropertyName(propertyNameInput);
+  if (propertyName.length === 0) {
+    throw new Error("Enter a property name before previewing.");
+  }
+
+  const parsedValue = parseInputValue(rawValue, operation, propertyName);
+  const changedFiles: PlannedChange[] = [];
+  const skippedFiles: SkippedChange[] = [];
+
+  for (const file of files) {
+    const nextValue = nextPropertyValue(file.value, file.propertyExists, operation, parsedValue);
+
+    if (valuesEqual(file.value, nextValue)) {
+      skippedFiles.push({
+        path: file.path,
+        value: file.value,
+        reason: "No change"
+      });
+      continue;
+    }
+
+    changedFiles.push({
+      path: file.path,
+      propertyExists: file.propertyExists,
+      oldValue: file.value,
+      newValue: nextValue,
+      oldDisplay: formatValue(file.value),
+      newDisplay: formatValue(nextValue)
+    });
+  }
+
+  return {
+    operation,
+    propertyName,
+    totalFiles: files.length,
+    changedFiles,
+    skippedFiles
+  };
+}
+
+export function nextPropertyValue(
+  currentValue: unknown,
+  propertyExists: boolean,
+  operation: BulkOperation,
+  parsedValue: unknown
+): unknown {
+  if (operation === "clear") {
+    return undefined;
+  }
+
+  if (operation === "replace") {
+    return parsedValue;
+  }
+
+  const requested = Array.isArray(parsedValue) ? parsedValue : [parsedValue];
+  const currentItems = propertyExists ? toList(currentValue) : [];
+
+  if (operation === "add") {
+    const next = [...currentItems];
+    for (const item of requested) {
+      if (!next.some((existing) => valuesEqual(existing, item))) {
+        next.push(item);
+      }
+    }
+    return next;
+  }
+
+  if (operation === "remove") {
+    return currentItems.filter((item) => !requested.some((removeItem) => valuesEqual(item, removeItem)));
+  }
+
+  return currentValue;
+}
+
+export function formatValue(value: unknown): string {
+  if (typeof value === "undefined") {
+    return "(missing)";
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatValue(item)).join(", ")}]`;
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function splitListInput(value: string, propertyName: string): string[] {
+  const values = value
+    .split(",")
+    .map((part) => normalizeToken(part, propertyName))
+    .filter((part) => part.length > 0);
+
+  if (values.length === 0) {
+    throw new Error("Enter at least one value before previewing this operation.");
+  }
+
+  return values;
+}
+
+function normalizeToken(value: string, propertyName: string): string {
+  const trimmed = value.trim();
+  if (isTagProperty(propertyName)) {
+    return trimmed.replace(/^#+/, "");
+  }
+  return trimmed;
+}
+
+function isTagProperty(propertyName: string): boolean {
+  const normalized = propertyName.trim().toLowerCase();
+  return normalized === "tag" || normalized === "tags";
+}
+
+function toList(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "undefined") {
+    return [];
+  }
+
+  return [value];
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
