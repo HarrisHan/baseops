@@ -29,7 +29,12 @@ Additional commands:
 - **BaseOps: Clear selected notes** removes the selection property from selected notes.
 - **BaseOps: Select active folder notes** marks every Markdown note in the active note's folder as selected.
 - **BaseOps: Create starter kit** creates a small demo folder so new users can try previews, presets, apply, and undo safely.
+- **BaseOps: Open property report** summarizes frontmatter property coverage, selected-note coverage, missing counts, and common values.
 - **BaseOps: Undo last operation** restores the most recent BaseOps batch operation from memory.
+
+## Property Report
+
+The property report helps you understand the shape of your vault before making bulk edits. It lists the most-used properties, how many selected notes include each property, how many notes are missing it, and the most common values. Use it to spot stale fields, inconsistent statuses, and properties that are ready for cleanup.
 
 ## Workflow Presets
 

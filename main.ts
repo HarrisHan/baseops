@@ -13,12 +13,14 @@ import {
   BulkOperation,
   DEFAULT_PREVIEW_LIMIT,
   DEFAULT_SELECTION_PROPERTY,
+  FileFrontmatterState,
   FilePropertyState,
   OperationPlan,
   formatValue,
   isSelectedValue,
   operationNeedsValue,
-  planOperation
+  planOperation,
+  summarizeProperties
 } from "./src/operations";
 
 interface OperationPreset {
@@ -114,6 +116,14 @@ export default class BaseOpsPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-property-report",
+      name: "Open property report",
+      callback: () => {
+        new PropertyReportModal(this.app, this).open();
+      }
+    });
+
+    this.addCommand({
       id: "undo-last-operation",
       name: "Undo last operation",
       callback: () => this.undoLastOperation()
@@ -159,6 +169,18 @@ export default class BaseOpsPlugin extends Plugin {
         path: file.path,
         propertyExists: Object.prototype.hasOwnProperty.call(frontmatter, propertyName),
         value: frontmatter[propertyName]
+      };
+    });
+  }
+
+  getFrontmatterStates(): FileFrontmatterState[] {
+    const selectionProperty = this.settings.selectionProperty.trim() || DEFAULT_SELECTION_PROPERTY;
+    return this.app.vault.getMarkdownFiles().map((file) => {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+      return {
+        path: file.path,
+        frontmatter,
+        selected: isSelectedValue(frontmatter[selectionProperty])
       };
     });
   }
@@ -608,6 +630,76 @@ class PresetNameModal extends Modal {
           this.close();
         });
     });
+  }
+}
+
+class PropertyReportModal extends Modal {
+  constructor(app: App, private plugin: BaseOpsPlugin) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const states = this.plugin.getFrontmatterStates();
+    const selectedCount = states.filter((state) => state.selected).length;
+    const stats = summarizeProperties(states, 4);
+    const { contentEl } = this;
+
+    contentEl.empty();
+    contentEl.addClass("baseops-modal");
+    contentEl.createEl("h2", { text: "BaseOps Property Report" });
+    contentEl.createEl("p", {
+      cls: "baseops-muted",
+      text: `${states.length} Markdown note${states.length === 1 ? "" : "s"}, ${selectedCount} selected.`
+    });
+
+    if (stats.length === 0) {
+      contentEl.createEl("p", {
+        text: "No frontmatter properties found yet."
+      });
+      return;
+    }
+
+    const table = contentEl.createEl("table", { cls: "baseops-table" });
+    const head = table.createEl("thead");
+    const headRow = head.createEl("tr");
+    for (const label of ["Property", "Files", "Selected", "Missing", "Common values"]) {
+      headRow.createEl("th", { text: label });
+    }
+
+    const body = table.createEl("tbody");
+    for (const stat of stats.slice(0, 30)) {
+      const row = body.createEl("tr");
+      row.createEl("td", { text: stat.name });
+      row.createEl("td", { text: String(stat.fileCount) });
+      row.createEl("td", { text: String(stat.selectedCount) });
+      row.createEl("td", { text: String(stat.missingCount) });
+      row.createEl("td", {
+        text: stat.sampleValues.map((sample) => `${sample.value} (${sample.count})`).join(", ")
+      });
+    }
+
+    if (stats.length > 30) {
+      contentEl.createEl("p", {
+        cls: "baseops-muted",
+        text: `${stats.length - 30} more propert${stats.length - 30 === 1 ? "y" : "ies"} hidden.`
+      });
+    }
+
+    new Setting(contentEl)
+      .addButton((button) => {
+        button
+          .setButtonText("Open Bulk Editor")
+          .setCta()
+          .onClick(() => {
+            this.close();
+            new BulkEditorModal(this.app, this.plugin).open();
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Close")
+          .onClick(() => this.close());
+      });
   }
 }
 

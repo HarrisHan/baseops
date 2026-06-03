@@ -9,6 +9,25 @@ export interface FilePropertyState {
   value: unknown;
 }
 
+export interface FileFrontmatterState {
+  path: string;
+  frontmatter: Record<string, unknown>;
+  selected: boolean;
+}
+
+export interface PropertyValueSample {
+  value: string;
+  count: number;
+}
+
+export interface PropertyStat {
+  name: string;
+  fileCount: number;
+  selectedCount: number;
+  missingCount: number;
+  sampleValues: PropertyValueSample[];
+}
+
 export interface PlannedChange {
   path: string;
   propertyExists: boolean;
@@ -168,6 +187,52 @@ export function formatValue(value: unknown): string {
   }
 
   return String(value);
+}
+
+export function summarizeProperties(files: FileFrontmatterState[], valueLimit = 5): PropertyStat[] {
+  const totalFiles = files.length;
+  const propertyCounts = new Map<
+    string,
+    {
+      fileCount: number;
+      selectedCount: number;
+      values: Map<string, number>;
+    }
+  >();
+
+  for (const file of files) {
+    for (const [propertyName, value] of Object.entries(file.frontmatter)) {
+      if (propertyName === "position") {
+        continue;
+      }
+
+      const current = propertyCounts.get(propertyName) ?? {
+        fileCount: 0,
+        selectedCount: 0,
+        values: new Map<string, number>()
+      };
+      current.fileCount += 1;
+      if (file.selected) {
+        current.selectedCount += 1;
+      }
+      const displayValue = formatValue(value);
+      current.values.set(displayValue, (current.values.get(displayValue) ?? 0) + 1);
+      propertyCounts.set(propertyName, current);
+    }
+  }
+
+  return Array.from(propertyCounts.entries())
+    .map(([name, stat]) => ({
+      name,
+      fileCount: stat.fileCount,
+      selectedCount: stat.selectedCount,
+      missingCount: totalFiles - stat.fileCount,
+      sampleValues: Array.from(stat.values.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
+        .slice(0, Math.max(1, valueLimit))
+    }))
+    .sort((left, right) => right.fileCount - left.fileCount || left.name.localeCompare(right.name));
 }
 
 function splitListInput(value: string, propertyName: string): string[] {

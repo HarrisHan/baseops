@@ -130,6 +130,36 @@ function formatValue(value) {
   }
   return String(value);
 }
+function summarizeProperties(files, valueLimit = 5) {
+  const totalFiles = files.length;
+  const propertyCounts = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    for (const [propertyName, value] of Object.entries(file.frontmatter)) {
+      if (propertyName === "position") {
+        continue;
+      }
+      const current = propertyCounts.get(propertyName) ?? {
+        fileCount: 0,
+        selectedCount: 0,
+        values: /* @__PURE__ */ new Map()
+      };
+      current.fileCount += 1;
+      if (file.selected) {
+        current.selectedCount += 1;
+      }
+      const displayValue = formatValue(value);
+      current.values.set(displayValue, (current.values.get(displayValue) ?? 0) + 1);
+      propertyCounts.set(propertyName, current);
+    }
+  }
+  return Array.from(propertyCounts.entries()).map(([name, stat]) => ({
+    name,
+    fileCount: stat.fileCount,
+    selectedCount: stat.selectedCount,
+    missingCount: totalFiles - stat.fileCount,
+    sampleValues: Array.from(stat.values.entries()).map(([value, count]) => ({ value, count })).sort((left, right) => right.count - left.count || left.value.localeCompare(right.value)).slice(0, Math.max(1, valueLimit))
+  })).sort((left, right) => right.fileCount - left.fileCount || left.name.localeCompare(right.name));
+}
 function splitListInput(value, propertyName) {
   const values = value.split(",").map((part) => normalizeToken(part, propertyName)).filter((part) => part.length > 0);
   if (values.length === 0) {
@@ -225,6 +255,13 @@ var BaseOpsPlugin = class extends import_obsidian.Plugin {
       callback: () => this.createStarterKit()
     });
     this.addCommand({
+      id: "open-property-report",
+      name: "Open property report",
+      callback: () => {
+        new PropertyReportModal(this.app, this).open();
+      }
+    });
+    this.addCommand({
       id: "undo-last-operation",
       name: "Undo last operation",
       callback: () => this.undoLastOperation()
@@ -261,6 +298,17 @@ var BaseOpsPlugin = class extends import_obsidian.Plugin {
         path: file.path,
         propertyExists: Object.prototype.hasOwnProperty.call(frontmatter, propertyName),
         value: frontmatter[propertyName]
+      };
+    });
+  }
+  getFrontmatterStates() {
+    const selectionProperty = this.settings.selectionProperty.trim() || DEFAULT_SELECTION_PROPERTY;
+    return this.app.vault.getMarkdownFiles().map((file) => {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+      return {
+        path: file.path,
+        frontmatter,
+        selected: isSelectedValue(frontmatter[selectionProperty])
       };
     });
   }
@@ -613,6 +661,62 @@ var PresetNameModal = class extends import_obsidian.Modal {
         await this.onSubmit(this.name);
         this.close();
       });
+    });
+  }
+};
+var PropertyReportModal = class extends import_obsidian.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+  onOpen() {
+    const states = this.plugin.getFrontmatterStates();
+    const selectedCount = states.filter((state) => state.selected).length;
+    const stats = summarizeProperties(states, 4);
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("baseops-modal");
+    contentEl.createEl("h2", { text: "BaseOps Property Report" });
+    contentEl.createEl("p", {
+      cls: "baseops-muted",
+      text: `${states.length} Markdown note${states.length === 1 ? "" : "s"}, ${selectedCount} selected.`
+    });
+    if (stats.length === 0) {
+      contentEl.createEl("p", {
+        text: "No frontmatter properties found yet."
+      });
+      return;
+    }
+    const table = contentEl.createEl("table", { cls: "baseops-table" });
+    const head = table.createEl("thead");
+    const headRow = head.createEl("tr");
+    for (const label of ["Property", "Files", "Selected", "Missing", "Common values"]) {
+      headRow.createEl("th", { text: label });
+    }
+    const body = table.createEl("tbody");
+    for (const stat of stats.slice(0, 30)) {
+      const row = body.createEl("tr");
+      row.createEl("td", { text: stat.name });
+      row.createEl("td", { text: String(stat.fileCount) });
+      row.createEl("td", { text: String(stat.selectedCount) });
+      row.createEl("td", { text: String(stat.missingCount) });
+      row.createEl("td", {
+        text: stat.sampleValues.map((sample) => `${sample.value} (${sample.count})`).join(", ")
+      });
+    }
+    if (stats.length > 30) {
+      contentEl.createEl("p", {
+        cls: "baseops-muted",
+        text: `${stats.length - 30} more propert${stats.length - 30 === 1 ? "y" : "ies"} hidden.`
+      });
+    }
+    new import_obsidian.Setting(contentEl).addButton((button) => {
+      button.setButtonText("Open Bulk Editor").setCta().onClick(() => {
+        this.close();
+        new BulkEditorModal(this.app, this.plugin).open();
+      });
+    }).addButton((button) => {
+      button.setButtonText("Close").onClick(() => this.close());
     });
   }
 };

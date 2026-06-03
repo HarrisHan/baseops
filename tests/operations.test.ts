@@ -4,7 +4,8 @@ import {
   isSelectedValue,
   nextPropertyValue,
   parseInputValue,
-  planOperation
+  planOperation,
+  summarizeProperties
 } from "../src/operations.ts";
 
 describe("selection values", () => {
@@ -82,5 +83,42 @@ describe("operation planning", () => {
 
   it("requires a property name", () => {
     assert.throws(() => planOperation([], " ", "clear", ""), /property name/);
+  });
+});
+
+describe("property summaries", () => {
+  it("summarizes property usage, selected coverage, missing count, and values", () => {
+    const stats = summarizeProperties(
+      [
+        {
+          path: "a.md",
+          selected: true,
+          frontmatter: { status: "todo", tags: ["project"], position: { start: 0 } }
+        },
+        {
+          path: "b.md",
+          selected: false,
+          frontmatter: { status: "done", owner: "Alex" }
+        },
+        {
+          path: "c.md",
+          selected: true,
+          frontmatter: { status: "todo", owner: "Alex" }
+        }
+      ],
+      3
+    );
+
+    const status = stats.find((stat) => stat.name === "status");
+    assert.equal(status?.fileCount, 3);
+    assert.equal(status?.selectedCount, 2);
+    assert.equal(status?.missingCount, 0);
+    assert.deepEqual(status?.sampleValues[0], { value: "todo", count: 2 });
+
+    const owner = stats.find((stat) => stat.name === "owner");
+    assert.equal(owner?.fileCount, 2);
+    assert.equal(owner?.missingCount, 1);
+
+    assert.equal(stats.some((stat) => stat.name === "position"), false);
   });
 });

@@ -28,3 +28,27 @@
   font-size: var(--font-smaller);
   overflow-wrap: anywhere;
 }
+
+.baseops-table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.baseops-table th,
+.baseops-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.baseops-table th {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  font-weight: 600;
+}
+
+.baseops-table td:first-child {
+  font-family: var(--font-monospace);
+}
