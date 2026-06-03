@@ -27,12 +27,19 @@ BaseOps uses a configurable checkbox-style property to choose notes. The default
 Additional commands:
 
 - **BaseOps: Clear selected notes** removes the selection property from selected notes.
+- **BaseOps: Select active folder notes** marks every Markdown note in the active note's folder as selected.
+- **BaseOps: Create starter kit** creates a small demo folder so new users can try previews, presets, apply, and undo safely.
 - **BaseOps: Undo last operation** restores the most recent BaseOps batch operation from memory.
+
+## Workflow Presets
+
+The bulk editor includes workflow presets for common changes, such as marking notes done, adding a review tag, or clearing an owner. You can save your current property, operation, and value as a reusable preset from the editor. Presets are local plugin settings and can be removed or restored from BaseOps settings.
 
 ## Settings
 
 - **Selection property** controls which frontmatter property marks selected notes.
 - **Preview row limit** keeps long previews compact.
+- **Workflow presets** lets you remove saved presets or restore the built-in set.
 - **Restore defaults** resets BaseOps settings.
 
 ## Privacy
@@ -51,7 +58,7 @@ GitHub releases should attach exactly these Obsidian plugin assets:
 - `manifest.json`
 - `styles.css`
 
-The first release tag should be `0.1.0`.
+Release tags must match the version in `manifest.json`.
 
 ## Development
 

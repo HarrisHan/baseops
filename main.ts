@@ -1,11 +1,13 @@
 import {
   App,
+  DropdownComponent,
   Modal,
   Notice,
   Plugin,
   PluginSettingTab,
   Setting,
-  TFile
+  TFile,
+  TextComponent
 } from "obsidian";
 import {
   BulkOperation,
@@ -19,9 +21,18 @@ import {
   planOperation
 } from "./src/operations";
 
+interface OperationPreset {
+  id: string;
+  name: string;
+  propertyName: string;
+  operation: BulkOperation;
+  rawValue: string;
+}
+
 interface BaseOpsSettings {
   selectionProperty: string;
   previewLimit: number;
+  presets: OperationPreset[];
 }
 
 interface UndoEntry {
@@ -31,13 +42,40 @@ interface UndoEntry {
   oldValue: unknown;
 }
 
-const DEFAULT_SETTINGS: BaseOpsSettings = {
-  selectionProperty: DEFAULT_SELECTION_PROPERTY,
-  previewLimit: DEFAULT_PREVIEW_LIMIT
-};
+const DEFAULT_PRESETS: OperationPreset[] = [
+  {
+    id: "mark-done",
+    name: "Mark as done",
+    propertyName: "status",
+    operation: "replace",
+    rawValue: "done"
+  },
+  {
+    id: "needs-review",
+    name: "Add needs-review tag",
+    propertyName: "tags",
+    operation: "add",
+    rawValue: "needs-review"
+  },
+  {
+    id: "clear-owner",
+    name: "Clear owner",
+    propertyName: "owner",
+    operation: "clear",
+    rawValue: ""
+  }
+];
+
+function getDefaultSettings(): BaseOpsSettings {
+  return {
+    selectionProperty: DEFAULT_SELECTION_PROPERTY,
+    previewLimit: DEFAULT_PREVIEW_LIMIT,
+    presets: DEFAULT_PRESETS.map((preset) => ({ ...preset }))
+  };
+}
 
 export default class BaseOpsPlugin extends Plugin {
-  settings: BaseOpsSettings = DEFAULT_SETTINGS;
+  settings: BaseOpsSettings = getDefaultSettings();
   private undoSnapshot: UndoEntry[] | null = null;
 
   async onload(): Promise<void> {
@@ -64,6 +102,18 @@ export default class BaseOpsPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "select-active-folder-notes",
+      name: "Select active folder notes",
+      callback: () => this.selectActiveFolderNotes()
+    });
+
+    this.addCommand({
+      id: "create-starter-kit",
+      name: "Create starter kit",
+      callback: () => this.createStarterKit()
+    });
+
+    this.addCommand({
       id: "undo-last-operation",
       name: "Undo last operation",
       callback: () => this.undoLastOperation()
@@ -73,14 +123,26 @@ export default class BaseOpsPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
+    const loaded = await this.loadData();
     this.settings = {
-      ...DEFAULT_SETTINGS,
-      ...(await this.loadData())
+      ...getDefaultSettings(),
+      ...loaded,
+      presets: normalizePresets(loaded?.presets)
     };
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  async addPreset(preset: OperationPreset): Promise<void> {
+    this.settings.presets = [...this.settings.presets, preset];
+    await this.saveSettings();
+  }
+
+  async removePreset(id: string): Promise<void> {
+    this.settings.presets = this.settings.presets.filter((preset) => preset.id !== id);
+    await this.saveSettings();
   }
 
   getSelectedMarkdownFiles(): TFile[] {
@@ -194,6 +256,70 @@ export default class BaseOpsPlugin extends Plugin {
 
     new Notice(`BaseOps: Cleared selection from ${files.length} file${files.length === 1 ? "" : "s"}.`);
   }
+
+  private async selectActiveFolderNotes(): Promise<void> {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) {
+      new Notice("BaseOps: Open a Markdown note before selecting a folder.");
+      return;
+    }
+
+    const folderPath = activeFile.parent?.path ?? "";
+    const propertyName = this.settings.selectionProperty.trim() || DEFAULT_SELECTION_PROPERTY;
+    const folderFiles = this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => (file.parent?.path ?? "") === folderPath);
+
+    for (const file of folderFiles) {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        frontmatter[propertyName] = true;
+      });
+    }
+
+    const label = folderPath.length > 0 ? folderPath : "vault root";
+    new Notice(`BaseOps: Selected ${folderFiles.length} note${folderFiles.length === 1 ? "" : "s"} in ${label}.`);
+  }
+
+  private async createStarterKit(): Promise<void> {
+    const folder = "BaseOps Starter Kit";
+    await this.createFolderIfMissing(folder);
+
+    const files = [
+      {
+        path: `${folder}/Start Here.md`,
+        content: starterGuideMarkdown(this.settings.selectionProperty)
+      },
+      {
+        path: `${folder}/Project - Launch checklist.md`,
+        content: starterItemMarkdown(this.settings.selectionProperty, "Launch checklist", "in-progress", ["baseops-demo", "project"], true)
+      },
+      {
+        path: `${folder}/Reading - Plugin documentation.md`,
+        content: starterItemMarkdown(this.settings.selectionProperty, "Plugin documentation", "inbox", ["baseops-demo", "reading"], true)
+      },
+      {
+        path: `${folder}/Idea - Bases workflow.md`,
+        content: starterItemMarkdown(this.settings.selectionProperty, "Bases workflow", "idea", ["baseops-demo", "idea"], false)
+      }
+    ];
+
+    let created = 0;
+    for (const file of files) {
+      if (this.app.vault.getAbstractFileByPath(file.path)) {
+        continue;
+      }
+      await this.app.vault.create(file.path, file.content);
+      created += 1;
+    }
+
+    new Notice(`BaseOps: Starter kit ready. Created ${created} file${created === 1 ? "" : "s"}.`);
+  }
+
+  private async createFolderIfMissing(path: string): Promise<void> {
+    if (!this.app.vault.getAbstractFileByPath(path)) {
+      await this.app.vault.createFolder(path);
+    }
+  }
 }
 
 class BulkEditorModal extends Modal {
@@ -205,6 +331,9 @@ class BulkEditorModal extends Modal {
   private applyButton: HTMLButtonElement | null = null;
   private previewContainer: HTMLElement | null = null;
   private valueContainer: HTMLElement | null = null;
+  private propertyInput: TextComponent | null = null;
+  private operationDropdown: DropdownComponent | null = null;
+  private valueInput: TextComponent | null = null;
 
   constructor(app: App, private plugin: BaseOpsPlugin) {
     super(app);
@@ -233,9 +362,27 @@ class BulkEditorModal extends Modal {
     }
 
     new Setting(contentEl)
+      .setName("Workflow preset")
+      .setDesc("Load a common operation, then adjust it before previewing.")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("", "Choose a preset");
+        for (const preset of this.plugin.settings.presets) {
+          dropdown.addOption(preset.id, preset.name);
+        }
+        dropdown.onChange((id) => {
+          const preset = this.plugin.settings.presets.find((candidate) => candidate.id === id);
+          if (preset) {
+            this.applyPreset(preset);
+          }
+          dropdown.setValue("");
+        });
+      });
+
+    new Setting(contentEl)
       .setName("Property")
       .setDesc("The frontmatter property to change.")
       .addText((text) => {
+        this.propertyInput = text;
         text.setPlaceholder("status, tags, owner")
           .setValue(this.propertyName)
           .onChange((value) => {
@@ -247,6 +394,7 @@ class BulkEditorModal extends Modal {
     new Setting(contentEl)
       .setName("Operation")
       .addDropdown((dropdown) => {
+        this.operationDropdown = dropdown;
         dropdown
           .addOption("replace", "Replace")
           .addOption("add", "Add")
@@ -269,6 +417,11 @@ class BulkEditorModal extends Modal {
           .setButtonText("Preview")
           .setCta()
           .onClick(() => this.preview());
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Save Preset")
+          .onClick(() => this.saveCurrentAsPreset());
       })
       .addButton((button) => {
         this.applyButton = button.buttonEl;
@@ -295,6 +448,7 @@ class BulkEditorModal extends Modal {
     this.valueContainer.empty();
     const valueSetting = new Setting(this.valueContainer);
     if (!operationNeedsValue(this.operation)) {
+      this.valueInput = null;
       valueSetting.setName("Value").setDesc("Clear removes the property from selected notes.");
       return;
     }
@@ -303,6 +457,7 @@ class BulkEditorModal extends Modal {
       .setName("Value")
       .setDesc("Use commas for add/remove list values. Tags may include #.")
       .addText((text) => {
+        this.valueInput = text;
         text
           .setPlaceholder(this.operation === "replace" ? "done" : "alpha, beta")
           .setValue(this.rawValue)
@@ -311,6 +466,42 @@ class BulkEditorModal extends Modal {
             this.invalidatePreview();
           });
       });
+  }
+
+  private applyPreset(preset: OperationPreset): void {
+    this.propertyName = preset.propertyName;
+    this.operation = preset.operation;
+    this.rawValue = preset.rawValue;
+    this.propertyInput?.setValue(this.propertyName);
+    this.operationDropdown?.setValue(this.operation);
+    this.renderValueSetting();
+    this.valueInput?.setValue(this.rawValue);
+    this.invalidatePreview();
+  }
+
+  private saveCurrentAsPreset(): void {
+    const propertyName = this.propertyName.trim();
+    if (propertyName.length === 0) {
+      new Notice("BaseOps: Enter a property before saving a preset.");
+      return;
+    }
+
+    if (operationNeedsValue(this.operation) && this.rawValue.trim().length === 0) {
+      new Notice("BaseOps: Enter a value before saving this preset.");
+      return;
+    }
+
+    new PresetNameModal(this.app, async (name) => {
+      await this.plugin.addPreset({
+        id: createPresetId(name),
+        name,
+        propertyName,
+        operation: this.operation,
+        rawValue: this.rawValue
+      });
+      new Notice(`BaseOps: Saved preset "${name}".`);
+      this.onOpen();
+    }).open();
   }
 
   private preview(): void {
@@ -384,6 +575,42 @@ class BulkEditorModal extends Modal {
   }
 }
 
+class PresetNameModal extends Modal {
+  private name = "";
+
+  constructor(app: App, private onSubmit: (name: string) => Promise<void>) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Save Preset" });
+
+    new Setting(contentEl)
+      .setName("Preset name")
+      .addText((text) => {
+        text.setPlaceholder("Review queue").onChange((value) => {
+          this.name = value.trim();
+        });
+      });
+
+    new Setting(contentEl).addButton((button) => {
+      button
+        .setButtonText("Save")
+        .setCta()
+        .onClick(async () => {
+          if (this.name.length === 0) {
+            new Notice("BaseOps: Enter a preset name.");
+            return;
+          }
+          await this.onSubmit(this.name);
+          this.close();
+        });
+    });
+  }
+}
+
 class BaseOpsSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: BaseOpsPlugin) {
     super(app, plugin);
@@ -428,11 +655,131 @@ class BaseOpsSettingTab extends PluginSettingTab {
         button
           .setButtonText("Restore Defaults")
           .onClick(async () => {
-            this.plugin.settings = { ...DEFAULT_SETTINGS };
+            this.plugin.settings = getDefaultSettings();
             await this.plugin.saveSettings();
             this.display();
             new Notice("BaseOps: Settings restored.");
           });
       });
+
+    containerEl.createEl("h3", { text: "Workflow Presets" });
+
+    for (const preset of this.plugin.settings.presets) {
+      new Setting(containerEl)
+        .setName(preset.name)
+        .setDesc(`${preset.operation} ${preset.propertyName}${preset.rawValue ? ` = ${preset.rawValue}` : ""}`)
+        .addButton((button) => {
+          button
+            .setButtonText("Remove")
+            .onClick(async () => {
+              await this.plugin.removePreset(preset.id);
+              this.display();
+              new Notice(`BaseOps: Removed preset "${preset.name}".`);
+            });
+        });
+    }
+
+    new Setting(containerEl)
+      .setName("Restore default presets")
+      .setDesc("Add the built-in BaseOps presets back to your workflow list.")
+      .addButton((button) => {
+        button
+          .setButtonText("Restore Presets")
+          .onClick(async () => {
+            const existing = new Set(this.plugin.settings.presets.map((preset) => preset.id));
+            const restored = DEFAULT_PRESETS.filter((preset) => !existing.has(preset.id)).map((preset) => ({ ...preset }));
+            this.plugin.settings.presets = [...this.plugin.settings.presets, ...restored];
+            await this.plugin.saveSettings();
+            this.display();
+            new Notice(`BaseOps: Restored ${restored.length} default preset${restored.length === 1 ? "" : "s"}.`);
+          });
+      });
   }
+}
+
+function normalizePresets(value: unknown): OperationPreset[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_PRESETS.map((preset) => ({ ...preset }));
+  }
+
+  const presets = value
+    .map((preset) => normalizePreset(preset))
+    .filter((preset): preset is OperationPreset => preset !== null);
+
+  return presets.length > 0 ? presets : DEFAULT_PRESETS.map((preset) => ({ ...preset }));
+}
+
+function normalizePreset(value: unknown): OperationPreset | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Partial<OperationPreset>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.propertyName !== "string" ||
+    typeof candidate.rawValue !== "string" ||
+    !["replace", "add", "remove", "clear"].includes(candidate.operation as string)
+  ) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    propertyName: candidate.propertyName,
+    operation: candidate.operation,
+    rawValue: candidate.rawValue
+  };
+}
+
+function createPresetId(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `${Date.now()}-${slug || "preset"}`;
+}
+
+function starterGuideMarkdown(selectionProperty: string): string {
+  return `---
+${selectionProperty}: false
+status: guide
+tags:
+  - baseops-demo
+---
+
+# BaseOps Starter Kit
+
+This folder gives you a tiny workflow you can edit safely.
+
+1. Open a Base view or the file explorer.
+2. Select demo notes by setting \`${selectionProperty}\` to \`true\`.
+3. Run **BaseOps: Open bulk editor**.
+4. Load a workflow preset, preview the changes, then apply.
+5. Run **BaseOps: Undo last operation** if you want to roll it back.
+`;
+}
+
+function starterItemMarkdown(
+  selectionProperty: string,
+  title: string,
+  status: string,
+  tags: string[],
+  selected: boolean
+): string {
+  return `---
+${selectionProperty}: ${selected ? "true" : "false"}
+status: ${status}
+tags:
+${tags.map((tag) => `  - ${tag}`).join("\n")}
+owner: You
+---
+
+# ${title}
+
+Use this demo note to try BaseOps previews, presets, and undo.
+`;
 }
