@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed GitHub Actions test bundling across Node runner versions.
+
 ## 0.4.0
 
 - Added GitHub Actions CI for test, build, and release checks.

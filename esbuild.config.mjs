@@ -3,6 +3,7 @@ import esbuild from "esbuild";
 
 const prod = process.argv.includes("production");
 const test = process.argv.includes("test");
+const externalBuiltins = [...new Set([...builtinModules, ...builtinModules.map((moduleName) => `node:${moduleName}`)])];
 
 const common = {
   bundle: true,
@@ -17,7 +18,7 @@ if (test) {
   await esbuild.build({
     ...common,
     entryPoints: ["tests/operations.test.ts"],
-    external: [...builtinModules],
+    external: externalBuiltins,
     format: "esm",
     outfile: "dist-tests/operations.test.mjs",
     platform: "node"
@@ -26,7 +27,7 @@ if (test) {
   await esbuild.build({
     ...common,
     entryPoints: ["main.ts"],
-    external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtinModules],
+    external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...externalBuiltins],
     outfile: "main.js",
     platform: "browser"
   });

@@ -1,6 +1,6 @@
 {
   "name": "baseops",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Safe bulk property operations for Obsidian Bases workflows.",
   "main": "main.js",
   "scripts": {
