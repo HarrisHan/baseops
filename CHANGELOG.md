@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- Preserved `node:` built-in imports in test bundles and moved CI runners to Node 24.
+
 ## 0.4.1
 
 - Fixed GitHub Actions test bundling across Node runner versions.

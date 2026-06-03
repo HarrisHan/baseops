@@ -4,6 +4,7 @@ import esbuild from "esbuild";
 const prod = process.argv.includes("production");
 const test = process.argv.includes("test");
 const externalBuiltins = [...new Set([...builtinModules, ...builtinModules.map((moduleName) => `node:${moduleName}`)])];
+const externalNodePrefixedBuiltins = ["node:*"];
 
 const common = {
   bundle: true,
@@ -18,7 +19,7 @@ if (test) {
   await esbuild.build({
     ...common,
     entryPoints: ["tests/operations.test.ts"],
-    external: externalBuiltins,
+    external: externalNodePrefixedBuiltins,
     format: "esm",
     outfile: "dist-tests/operations.test.mjs",
     platform: "node"
