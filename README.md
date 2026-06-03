@@ -71,6 +71,11 @@ Release tags must match the version in `manifest.json`.
 npm install
 npm test
 npm run build
+npm run release:check
 ```
 
 The build uses esbuild and writes `main.js` at the plugin root.
+
+## Release Workflow
+
+BaseOps includes GitHub Actions for CI and release publishing. Push a semantic version tag that matches `manifest.json`, such as `0.4.0`, and the release workflow builds, tests, validates, and attaches `main.js`, `manifest.json`, and `styles.css` to the GitHub release.
